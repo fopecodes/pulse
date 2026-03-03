@@ -10,6 +10,9 @@
 #include "proc/network.hpp"
 #include "ui/network_panel.hpp"
 
+#include "proc/process.hpp"
+#include "ui/process_panel.hpp"
+
 #include <ftxui/component/component.hpp>
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
@@ -29,16 +32,20 @@ auto main() -> int {
     proc::memory_reader memory;
     proc::disk_reader disk;
     proc::network_reader network;
+    proc::process_reader process;
+
     ui::cpu_panel cpu_ui;
     ui::mem_panel memory_ui;
     ui::disk_panel disk_ui;
     ui::network_panel network_ui;
+    ui::process_panel process_ui;
 
     double cpu_total{};
     std::vector<double> cpu_cores;
     proc::memory_info mem_info;
     std::vector<proc::disk_info> disk_info;
     std::vector<proc::net_interface> net_info;
+    std::vector<proc::process_info> proc_info;
     std::mutex data_mutex;
 
     std::jthread collector([&](std::stop_token st) {
@@ -47,6 +54,7 @@ auto main() -> int {
                 auto mem_result = memory.read();
                 auto disk_result = disk.read();
                 auto net_result = network.read();
+                auto proc_result = process.read();
                 {
                     std::lock_guard lock(data_mutex);
                     if (cpu_result) {
@@ -61,6 +69,9 @@ auto main() -> int {
                     }
                     if (net_result) {
                         net_info = *net_result; 
+                    }
+                    if (proc_result) {
+                        proc_info = *proc_result;
                     }
                 }
                 std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -77,28 +88,29 @@ auto main() -> int {
 
 
     auto renderer = Renderer([&] {
-            std::lock_guard lock(data_mutex);
-            return vbox({
-                    text("pulse") | bold | center,
-                    separator(),
-                    hbox({
-                        cpu_ui.render(cpu_total, cpu_cores) | flex,
-                        vbox({
-                            memory_ui.render(mem_info),
-                            disk_ui.render(disk_info),
-                            network_ui.render(net_info),
-                            }) | flex,
-                        }) | flex,
-                });
-            });
+        std::lock_guard lock(data_mutex);
+        return vbox({
+            text("pulse") | bold | center,
+            separator(),
+            hbox({
+            cpu_ui.render(cpu_total, cpu_cores) | flex,
+                vbox({
+                    memory_ui.render(mem_info),
+                    disk_ui.render(disk_info),
+                    network_ui.render(net_info),
+                }) | flex,
+            }),
+            process_ui.render(proc_info) | flex,
+        });
+    });
     
     auto component = CatchEvent(renderer, [&](Event event) {
-            if (event == Event::Character('q')) {
-                screen.Exit();
-                return true;
-            }
-            return false;
-            });
+        if (event == Event::Character('q')) {
+            screen.Exit();
+            return true;
+        }
+        return false;
+    });
 
     screen.Loop(component);
     return 0;
